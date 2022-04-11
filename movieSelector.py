@@ -1,81 +1,86 @@
 class MovieSelector:
   @property
   def showTransitionError(self) -> bool:
-    return self.ownerComponent.par.Showtransitionerror.eval()
+    return bool(self.ownerComponent.par.Showtransitionerror.eval())
 
   @showTransitionError.setter
   def showTransitionError(self, value: bool):
-    self.ownerComponent.par.Showtransitionerror.val = value
+    self.ownerComponent.par.Showtransitionerror.val = int(value)
 
   @property
-  def activeMovieIndex(self) -> int:
+  def showLoadError(self) -> bool:
+    return bool(self.ownerComponent.par.Showloaderror.eval())
+
+  @showLoadError.setter
+  def showLoadError(self, value: bool):
+    self.ownerComponent.par.Showloaderror.val = int(value)
+
+  @property
+  def activeMovieNumber(self) -> int:
     return self.ownerComponent.par.Activemovie.eval()
 
-  @property
-  def inactiveMovieIndex(self) -> int:
-    return 1 - self.activeMovieIndex;
-
-  @activeMovieIndex.setter
-  def activeMovieIndex(self, val: int):
+  @activeMovieNumber.setter
+  def activeMovieNumber(self, val: int):
     self.ownerComponent.par.Activemovie.val = val
 
+  @property
+  def activeMovie(self) -> op:
+    return self.movies[self.activeMovieNumber - 1]
+
+  @property
+  def inactiveMovieNumber(self) -> int:
+    return 1 if self.activeMovieNumber == 2 else 2
+
+  @property
+  def inactiveMovie(self) -> op:
+    return self.movies[self.inactiveMovieNumber - 1]
 
   def __init__(self, ownerComponent) -> None:
     self.ownerComponent = ownerComponent
     self.movies = [
-      ( ownerComponent.op('moviefilein1'), ownerComponent.op('select_movie1') ),
-      ( ownerComponent.op('moviefilein2'), ownerComponent.op('select_movie2') )
+      self.ownerComponent.op('preloadableMovie1'),
+      self.ownerComponent.op('preloadableMovie2')
     ]
-    self.activeMovieIndex = 0
+    for m in self.movies:
+      m.par.Unload.pulse()
+      m.par.Moviefile.val = ''
+
+    self.activeMovieNumber = 1
     self.transitioning = False
     self.showTransitionError = False
+    self.showLoadError = False
 
-    [self.unloadMovie(i) for i in range(len(self.movies))]
     print('MovieSelector initialized')
 
-  def unloadMovie(self, index: int):
-    print(f'unloading movie container {index}')
-    movieIn, select = self.movies[index]
-    select.par.top = ''
-    movieIn.par.play = 0
-    movieIn.par.file = ''
-    movieIn.unload()
-
-  def loadMovie(self, index: int, path: str):
+  def Play(self, path: str):
     if self.transitioning:
       self.showTransitionError = True
       return
 
-    self.unloadMovie(index)
-
-    print(f'loading movie container {index} with {path}')
-    movieIn, _ = self.movies[index]
-    movieIn.par.file = path
-    movieIn.preload()
-
-  def Play(self, path: str):
-    self.loadMovie(self.inactiveMovieIndex, path)
-
-  def OnMovieLoaded(self, movieNumber: float):
-    index = int(movieNumber) - 1
-    movieIn, select = self.movies[int(index)]
-
-    # Touch likes to randomly toggle the fully_pre_read state when panels/menus
-    # are opened for some reason. If we've already loaded the video, we don't 
-    # want to set the transitioning state again as onMovieChanged won't be 
-    # fired a second time.
-    if self.activeMovieIndex == index:
-      return
-
+    self.showLoadError = False
     self.transitioning = True
-    print(f'movie {index} loaded')
+    self.inactiveMovie.par.Moviefile.val = path
+    self.inactiveMovie.par.Load.pulse()
 
-    movieIn.par.play = 1
-    select.par.top = movieIn.path
+  def OnMovieLoadError(self, movieNumber: int):
+    print(f'error loading movie {movieNumber}')
+    self.showLoadError = True
+    self.inactiveMovie.par.Unload.pulse()
 
-    self.activeMovieIndex = index
+  def OnMovieLoaded(self, movieNumber: int):
+    print(f'movie {movieNumber} loaded')
+    self.activeMovieNumber = movieNumber
 
   def OnMovieChanged(self):
-    self.unloadMovie(self.inactiveMovieIndex)
+    if self.inactiveMovie.par.State.eval() == 'loaded':
+      print(f'active movie is: {self.activeMovieNumber}')
+      print(f'unloading {self.inactiveMovieNumber}')
+      self.inactiveMovie.par.Unload.pulse()
+      self.inactiveMovie.par.Unload.pulse()
+    else:
+      # reset state to allow movies to be loaded again
+      self.OnMovieUnloaded(self.inactiveMovieNumber) 
+
+  def OnMovieUnloaded(self, movieNumber: int):
     self.transitioning = False
     self.showTransitionError = False
